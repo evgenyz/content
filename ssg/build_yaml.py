@@ -1877,7 +1877,7 @@ class LinearLoader(object):
         self.load_entities_by_id(filenames, self.platforms, Platform)
         self.product_cpes.platforms = self.platforms
 
-    
+
 
         for g in self.groups.values():
             g.load_entities(self.rules, self.values, self.groups)
