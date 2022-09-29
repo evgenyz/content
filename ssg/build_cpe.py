@@ -12,10 +12,12 @@ from .constants import PREFIX_TO_NS
 from .utils import merge_dicts, required_key
 from .xml import ElementTree as ET
 from .yaml import open_and_macro_expand
-from .boolean_expression import Algebra, Symbol, Function
+from .boolean_expression import Algebra, Symbol, Function, get_platform_id
+
 
 class CPEDoesNotExist(Exception):
     pass
+
 
 class ProductCPEs(object):
     """
@@ -84,27 +86,21 @@ class ProductCPEs(object):
         for cpe_id, cpe in self.cpes_by_id.items():
             self.cpes_by_name[cpe.name] = cpe
 
-
-    def _is_name(self, ref):
-        return ref.startswith("cpe:")
-
     def get_cpe(self, ref):
         try:
-            if self._is_name(ref):
+            if ref.startswith("cpe:"):
                 return self.cpes_by_name[ref]
             else:
-                return self.cpes_by_id[ref]
+                return self.cpes_by_id[get_platform_id(ref)]
         except KeyError:
             raise CPEDoesNotExist("CPE %s is not defined in %s" %(ref, self.product_yaml["cpes_root"]))
-
 
     def get_cpe_name(self, cpe_id):
         cpe = self.get_cpe(cpe_id)
         return cpe.name
 
     def get_product_cpe_names(self):
-        return [ cpe.name for cpe in self.product_cpes.values() ]
-
+        return [cpe.name for cpe in self.product_cpes.values()]
 
 
 class CPEList(object):
@@ -152,9 +148,11 @@ class CPEItem(object):
 
         self.name = cpeitem_data["name"]
         self.title = cpeitem_data["title"]
-        self.check_id = cpeitem_data["check_id"]
+        self.check_id = cpeitem_data.get("check_id", "")
         self.bash_conditional = cpeitem_data.get("bash_conditional", "")
         self.ansible_conditional = cpeitem_data.get("ansible_conditional", "")
+        self.template = cpeitem_data.get("template", {})
+        self.args = cpeitem_data.get("args", {})
 
     def to_xml_element(self, cpe_oval_filename):
         cpe_item = ET.Element("{%s}cpe-item" % CPEItem.ns)
@@ -162,12 +160,13 @@ class CPEItem(object):
 
         cpe_item_title = ET.SubElement(cpe_item, "{%s}title" % CPEItem.ns)
         cpe_item_title.set('xml:lang', "en-us")
-        cpe_item_title.text = self.title
+        cpe_item_title.text = self.title.format(**self.as_dict())
 
         cpe_item_check = ET.SubElement(cpe_item, "{%s}check" % CPEItem.ns)
         cpe_item_check.set('system', oval_namespace)
         cpe_item_check.set('href', cpe_oval_filename)
-        cpe_item_check.text = self.check_id
+        cpe_item_check.text = self.check_id.format(**self.as_dict())
+
         return cpe_item
 
 
@@ -175,7 +174,6 @@ class CPEALLogicalTest(Function):
 
     prefix = "cpe-lang"
     ns = PREFIX_TO_NS[prefix]
-
 
     def to_xml_element(self):
         cpe_test = ET.Element("{%s}logical-test" % CPEALLogicalTest.ns)
@@ -228,7 +226,7 @@ class CPEALLogicalTest(Function):
         return cond
 
 
-class CPEALFactRef (Symbol):
+class CPEALFactRef(Symbol):
 
     prefix = "cpe-lang"
     ns = PREFIX_TO_NS[prefix]
@@ -238,15 +236,17 @@ class CPEALFactRef (Symbol):
         self.cpe_name = obj  # we do not want to modify original name used for platforms
         self.bash_conditional = ""
         self.ansible_conditional = ""
+        self.id_ = ""
 
     def enrich_with_cpe_info(self, cpe_products):
         self.bash_conditional = cpe_products.get_cpe(self.cpe_name).bash_conditional
         self.ansible_conditional = cpe_products.get_cpe(self.cpe_name).ansible_conditional
         self.cpe_name = cpe_products.get_cpe_name(self.cpe_name)
+        self.id_ = self.as_id()
 
     def to_xml_element(self):
         cpe_factref = ET.Element("{%s}fact-ref" % CPEALFactRef.ns)
-        cpe_factref.set('name', self.cpe_name)
+        cpe_factref.set('name', self.cpe_name.format(**self.as_dict()))
 
         return cpe_factref
 
@@ -255,6 +255,7 @@ class CPEALFactRef (Symbol):
 
     def to_ansible_conditional(self):
         return self.ansible_conditional
+
 
 def extract_subelement(objects, sub_elem_type):
     """

@@ -7,6 +7,7 @@ import imp
 import glob
 
 import ssg.build_yaml
+import ssg.build_sce
 import ssg.utils
 import ssg.yaml
 from ssg.build_cpe import ProductCPEs
@@ -35,7 +36,7 @@ lang_to_ext_map = {
 templates = dict()
 
 
-class Template():
+class Template:
     def __init__(self, template_root_directory, name):
         self.template_root_directory = template_root_directory
         self.name = name
@@ -102,12 +103,14 @@ class Builder(object):
     """
     def __init__(
             self, env_yaml, resolved_rules_dir, templates_dir,
-            remediations_dir, checks_dir):
+            remediations_dir, checks_dir, platforms_dir):  #TODO , cpe_items_dir
         self.env_yaml = env_yaml
         self.resolved_rules_dir = resolved_rules_dir
         self.templates_dir = templates_dir
         self.remediations_dir = remediations_dir
         self.checks_dir = checks_dir
+        self.platforms_dir = platforms_dir
+        # TODO self.cpe_items_dir = cpe_items_dir
         self.output_dirs = dict()
         for lang in languages:
             lang_dir = lang
@@ -129,7 +132,7 @@ class Builder(object):
             if maybe_template.looks_like_template():
                 maybe_template.load()
                 templates[item] = maybe_template
-        self.product_cpes = ProductCPEs(env_yaml)
+        self.product_cpes = ProductCPEs(env_yaml)  # TODO?
 
     def build_lang_file(
             self, rule_id, template_name, template_vars, lang, local_env_yaml):
@@ -202,6 +205,7 @@ class Builder(object):
         Builds templated content for a given rule for a given language.
         Writes the output to the correct build directories.
         """
+        #print(repr(templates))
         if lang not in templates[template_name].langs or lang.startswith("sce-"):
             return
 
@@ -248,12 +252,12 @@ class Builder(object):
             template_name = template["name"]
         except KeyError:
             raise ValueError(
-                "Rule {0} is missing template name under template key".format(
-                    rule_id))
+                "Template {0} is missing template name key".format(
+                    repr(template)))
         if template_name not in templates.keys():
             raise ValueError(
-                "Rule {0} uses template {1} which does not exist.".format(
-                    rule_id, template_name))
+                "Template {0} uses template name {1} which does not exist in templates".format(
+                    repr(template), template_name))
         return template_name
 
     def get_resolved_langs_to_generate(self, rule):
@@ -284,6 +288,43 @@ class Builder(object):
             processed[new_variable] = value
 
         return processed
+
+    def build_platform(self, platform):
+        for symbol in platform.test.get_symbols():
+            cpe_id = symbol.as_id()
+            cpe = self.product_cpes.get_cpe(symbol.name)
+
+            if 'name' not in cpe.template:
+                continue
+            template_name = cpe.template['name']
+
+            arg = symbol.arg
+            if arg in cpe.args:
+                rendered_vars = cpe.args[arg]
+            elif arg is None:
+                rendered_vars = {}
+            else:
+                raise ValueError("Platform {0} does not allow arg '{1}' ".format(symbol.name, arg))
+            rendered_vars.update(symbol.as_dict())
+            template_vars = self.process_product_vars(rendered_vars)
+
+            # Add the rule_id ID which will be reused in OVAL templates as OVAL
+            # definition ID so that the build system matches the generated
+            # check with the rule.
+            template_vars["_rule_id"] = cpe_id
+            # checks and remediations are processed with a custom YAML dict
+            local_env_yaml = self.env_yaml.copy()
+            local_env_yaml["rule_id"] = cpe_id
+            local_env_yaml["rule_title"] = cpe.title
+            local_env_yaml["products"] = self.env_yaml["product"]
+
+            for lang in ['oval', 'bash', 'ansible']:
+                try:
+                    self.build_lang(cpe_id, template_name, template_vars, lang, local_env_yaml)
+                except Exception as e:
+                    print("Error building template {0} for platform {1}".format(lang, symbol.name),
+                          file=sys.stderr)
+                    raise e
 
     def build_rule(self, rule_id, rule_title, template, langs_to_generate, identifiers,
                    platforms=None):
@@ -369,6 +410,13 @@ class Builder(object):
             self.build_rule(rule.id_, rule.title, rule.template, langs_to_generate,
                             rule.identifiers, platforms=rule.platforms)
 
+    def build_all_platforms(self):
+        for platform_file in sorted(os.listdir(self.platforms_dir)):
+            platform_path = os.path.join(self.platforms_dir, platform_file)
+            platform = ssg.build_yaml.Platform.from_yaml(
+                platform_path, self.env_yaml, self.product_cpes)
+            self.build_platform(platform)
+
     def build(self):
         """
         Builds all templated content for all languages, writing
@@ -381,3 +429,4 @@ class Builder(object):
 
         self.build_extra_ovals()
         self.build_all_rules()
+        self.build_all_platforms()

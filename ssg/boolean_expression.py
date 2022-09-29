@@ -1,3 +1,4 @@
+import uuid
 from .ext.boolean import boolean
 
 # Monkey-patch pkg_resources.safe_name function to keep underscores intact
@@ -20,6 +21,11 @@ SPEC_OP_ID_TRANSLATION = {
     '>=': 'gt_or_eq',
     '<=': 'le_or_eq',
 }
+
+
+def get_platform_id(expr):
+    req = pkg_resources.Requirement.parse(expr)
+    return req.name
 
 
 class Function(boolean.Function):
@@ -55,6 +61,9 @@ class Function(boolean.Function):
             op = 'or'
         return '_{0}_'.format(op).join([arg.as_id() for arg in self.args])
 
+    def as_uuid(self):
+        return str(uuid.uuid5(uuid.NAMESPACE_X500, self.as_id()))
+
 
 class Symbol(boolean.Symbol):
     """
@@ -85,9 +94,17 @@ class Symbol(boolean.Symbol):
 
     def as_id(self):
         id_str = self.name
-        for (op, ver) in self.spec.specs:
-            id_str += '_{0}_{1}'.format(SPEC_OP_ID_TRANSLATION.get(op, 'unknown_spec_op'), ver)
+        if self.spec.extras:
+            id_str += '_' + '_'.join(self.spec.extras)
         return id_str
+
+    def as_dict(self):
+        res = {
+            'id': self.as_id(),
+            'name': self.name,
+            'arg': self.arg,
+        }
+        return res
 
     @property
     def name(self):
@@ -96,6 +113,10 @@ class Symbol(boolean.Symbol):
     @property
     def specs(self):
         return self.spec.specs
+
+    @property
+    def arg(self):
+        return ','.join(self.spec.extras) if self.spec.extras else None
 
 
 class Algebra(boolean.BooleanAlgebra):

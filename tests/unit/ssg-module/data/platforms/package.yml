@@ -1,0 +1,8 @@
+name: package
+original_expression: package[chrony]
+xml_content: <ns0:platform xmlns:ns0="http://cpe.mitre.org/language/2.0" id="aarch64_arch"><ns0:logical-test
+    operator="AND" negate="false"><ns0:fact-ref name="cpe:/a:aarch64_arch" /></ns0:logical-test></ns0:platform>
+bash_conditional: grep -q aarch64 /proc/sys/kernel/osrelease
+ansible_conditional: ansible_architecture == "aarch64"
+definition_location: ''
+documentation_complete: true

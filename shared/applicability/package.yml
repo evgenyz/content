@@ -1,0 +1,14 @@
+cpes:
+
+  - package:
+      name: 'cpe:/a:{arg}'
+      title: 'Package {arg} is installed'
+      template:
+          name: cond_package
+      args:
+          chrony:
+              title: "Chrony Server"
+              pkgname: chrony
+          ntp:
+              title: "NTP Server"
+              pkgname: ntp
